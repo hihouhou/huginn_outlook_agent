@@ -274,8 +274,7 @@ module Agents
       if interpolated['raw_email'] == 'true'
         result = {}
         result['id'] = email_id
-#        result['raw_mail'] = response.body.gsub(/(?:\n\r?|\r\n?)/, '<br>')
-        result['raw_mail'] = response.body
+        result['raw_mail'] = Base64.encode64(response.body)
         log "raw_mail"
         log result['raw_mail']
 
