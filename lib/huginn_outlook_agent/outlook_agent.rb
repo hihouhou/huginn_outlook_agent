@@ -23,6 +23,8 @@ module Agents
 
       `raw_email` if you want MIME format content.
 
+      `email_id` is the id of your email.
+
       `emit_events` is for creating an event.
 
       `type` is for the wanted action like get_new_emails / send_email.
@@ -113,6 +115,7 @@ module Agents
         'refresh_token' => '',
         'folder' => '',
         'debug' => 'false',
+        'email_id' => '',
         'raw_email' => 'false',
         'emit_events' => 'true',
         'expected_receive_period_in_days' => '2',
@@ -125,12 +128,13 @@ module Agents
     form_configurable :access_token, type: :string
     form_configurable :folder, type: :string
     form_configurable :debug, type: :boolean
+    form_configurable :email_id, type: :string
     form_configurable :raw_email, type: :boolean
     form_configurable :emit_events, type: :boolean
     form_configurable :expected_receive_period_in_days, type: :string
-    form_configurable :type, type: :array, values: ['get_new_emails', 'send_email']
+    form_configurable :type, type: :array, values: ['get_new_emails', 'send_email', 'delete_email']
     def validate_options
-      errors.add(:base, "type has invalid value: should be 'get_new_emails', 'send_email'") if interpolated['type'].present? && !%w(get_new_emails send_email).include?(interpolated['type'])
+      errors.add(:base, "type has invalid value: should be 'get_new_emails', 'send_email', 'delete_email'") if interpolated['type'].present? && !%w(get_new_emails send_email delete_email).include?(interpolated['type'])
 
       unless options['client_id'].present?
         errors.add(:base, "client_id is a required field")
@@ -150,6 +154,10 @@ module Agents
 
       unless options['refresh_token'].present?
         errors.add(:base, "refresh_token is a required field")
+      end
+
+      unless options['email_id'].present? || !['delete_email'].include?(options['type'])
+        errors.add(:base, "email_id is a required field")
       end
 
       if options.has_key?('raw_email') && boolify(options['raw_email']).nil?
@@ -200,7 +208,7 @@ module Agents
 
       if interpolated['debug'] == 'true'
         log "body"
-        log body
+        log body.to_s.strip.empty? ? "empty" : body
       end
 
     end
@@ -275,8 +283,6 @@ module Agents
         result = {}
         result['id'] = email_id
         result['raw_mail'] = Base64.encode64(response.body)
-        log "raw_mail"
-        log result['raw_mail']
 
         return result
       else
@@ -376,6 +382,33 @@ module Agents
 
     end
 
+    def delete_email()
+
+      check_token_validity()
+      uri = URI.parse("https://graph.microsoft.com/v1.0/me/messages/#{interpolated['email_id']}")
+      request = Net::HTTP::Delete.new(uri)
+      request.content_type = "application/json"
+      request["Authorization"] = "Bearer  #{interpolated['access_token']}"
+
+      req_options = {
+        use_ssl: uri.scheme == "https",
+      }
+
+      response = Net::HTTP.start(uri.hostname, uri.port, req_options) do |http|
+        http.request(request)
+      end
+
+      log_curl_output(response.code,response.body)
+
+      if interpolated['emit_events'] == 'true'
+        if response.code.to_i == 204
+          log "test"
+          create_event :payload => { 'email_id' => "#{interpolated['email_id']}", 'status' => "deleted" }
+        end
+      end
+
+    end
+
     def trigger_action
 
       case interpolated['type']
@@ -383,6 +416,8 @@ module Agents
         get_new_emails()
       when "send_email"
         send_email()
+      when "delete_email"
+        delete_email()
       else
         log "Error: type has an invalid value (#{interpolated['type']})"
       end
